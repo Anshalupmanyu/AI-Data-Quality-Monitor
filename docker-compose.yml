@@ -1,0 +1,140 @@
+# ============================================================
+# Data Quality Monitoring Pipeline — Docker Compose
+# Starts all services with: docker compose up -d
+# ============================================================
+
+services:
+
+  # ----------------------------------------------------------
+  # 1. ZOOKEEPER — required by Kafka to manage broker metadata
+  # ----------------------------------------------------------
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+
+  # ----------------------------------------------------------
+  # 2. KAFKA — message broker that receives orders from the
+  #    producer and holds them until Airflow consumes them
+  # ----------------------------------------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
+  # ----------------------------------------------------------
+  # 3. POSTGRES — stores raw_orders, anomalies,
+  #    anomaly_reports, and pipeline_runs tables
+  # ----------------------------------------------------------
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql # runs on first boot
+
+  # ----------------------------------------------------------
+  # 4. AIRFLOW — orchestrates ingestion (DAG 1) and quality
+  #    checks + LLM explanations (DAG 2)
+  # ----------------------------------------------------------
+  airflow:
+    build:
+      context: ./airflow # points to airflow/Dockerfile
+    container_name: airflow
+    depends_on:
+      - postgres
+      - kafka
+    ports:
+      - "8080:8080" # Airflow web UI
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      AIRFLOW__CORE__FERNET_KEY: ''
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      KAFKA_BROKER_URL: kafka:29092
+      OLLAMA_HOST: http://ollama:11434
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags # sync DAG files without rebuilding
+      - ./quality_engine:/opt/airflow/quality_engine # checks.py available to DAGs
+      - ./llm_service:/opt/airflow/llm_service # explain.py available to DAGs
+      - airflow_logs:/opt/airflow/logs
+
+  # ----------------------------------------------------------
+  # 5. PRODUCER — generates fake e-commerce orders and
+  #    publishes them to the Kafka "orders" topic
+  # ----------------------------------------------------------
+  producer:
+    build:
+      context: ./producer # points to producer/Dockerfile
+    container_name: producer
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKER_URL: kafka:29092
+      KAFKA_TOPIC: orders
+
+  # ----------------------------------------------------------
+  # 6. OLLAMA — local LLM server that generates plain-English
+  #    explanations for detected anomalies
+  # ----------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama # persists downloaded models
+
+  # ----------------------------------------------------------
+  # 7. METABASE — dashboard UI to visualise anomalies,
+  #    LLM summaries, and pipeline health
+  # ----------------------------------------------------------
+  metabase:
+    image: metabase/metabase:latest
+    container_name: metabase
+    depends_on:
+      - postgres
+    ports:
+      - "3000:3000" # Metabase web UI
+    environment:
+      MB_DB_TYPE: h2 # Metabase's own internal DB (default)
+
+# ============================================================
+# Named volumes — data persists even if containers are deleted
+# ============================================================
+volumes:
+  zookeeper_data:
+  kafka_data:
+  postgres_data:
+  airflow_logs:
+  ollama_data:
