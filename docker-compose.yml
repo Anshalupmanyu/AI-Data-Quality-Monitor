@@ -6,7 +6,7 @@
 services:
 
   # ----------------------------------------------------------
-  # 1. ZOOKEEPER — required by Kafka to manage broker metadata
+  # 1. ZOOKEEPER
   # ----------------------------------------------------------
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.0
@@ -20,8 +20,7 @@ services:
       - zookeeper_data:/var/lib/zookeeper/data
 
   # ----------------------------------------------------------
-  # 2. KAFKA — message broker that receives orders from the
-  #    producer and holds them until Airflow consumes them
+  # 2. KAFKA
   # ----------------------------------------------------------
   kafka:
     image: confluentinc/cp-kafka:7.6.0
@@ -42,8 +41,7 @@ services:
       - kafka_data:/var/lib/kafka/data
 
   # ----------------------------------------------------------
-  # 3. POSTGRES — stores raw_orders, anomalies,
-  #    anomaly_reports, and pipeline_runs tables
+  # 3. POSTGRES
   # ----------------------------------------------------------
   postgres:
     image: postgres:15
@@ -90,8 +88,7 @@ services:
       - airflow_logs:/opt/airflow/logs
 
   # ----------------------------------------------------------
-  # 5. PRODUCER — generates fake e-commerce orders and
-  #    publishes them to the Kafka "orders" topic
+  # 5. PRODUCER
   # ----------------------------------------------------------
   producer:
     build:
@@ -104,8 +101,7 @@ services:
       KAFKA_TOPIC: orders
 
   # ----------------------------------------------------------
-  # 6. OLLAMA — local LLM server that generates plain-English
-  #    explanations for detected anomalies
+  # 6. OLLAMA
   # ----------------------------------------------------------
   ollama:
     image: ollama/ollama:latest
@@ -116,8 +112,7 @@ services:
       - ollama_data:/root/.ollama # persists downloaded models
 
   # ----------------------------------------------------------
-  # 7. METABASE — dashboard UI to visualise anomalies,
-  #    LLM summaries, and pipeline health
+  # 7. METABASE
   # ----------------------------------------------------------
   metabase:
     image: metabase/metabase:latest
